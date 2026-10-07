@@ -10,9 +10,13 @@ const files = {
 };
 
 const sessions = new Map(); // token -> username
-const attempts = new Map(); // "ip:username" -> { count, lockedUntil }
+const attempts = new Map(); // key -> { count, lockedUntil }
 const MAX_ATTEMPTS = 5;
 const LOCK_MS = 60 * 1000;
+const MAX_USERS = 200;
+
+// Set to "true" on the hosting service, not on your PC
+const HOSTED = process.env.HOSTED === "true";
 
 function sendJson(res, status, data) {
   res.writeHead(status, { "Content-Type": "application/json" });
@@ -97,6 +101,11 @@ const server = http.createServer(function (req, res) {
       }
 
       const users = loadUsers();
+
+      if (users.length >= MAX_USERS) {
+        return sendJson(res, 503, { ok: false, error: "Registration is closed for this demo." });
+      }
+
       const taken = users.some(function (u) {
         return u.username.toLowerCase() === username.toLowerCase();
       });
@@ -127,7 +136,11 @@ const server = http.createServer(function (req, res) {
 
       const username = String(data.username || "").trim();
       const password = String(data.password || "");
-      const key = req.socket.remoteAddress + ":" + username.toLowerCase();
+
+      // On a host, all visitors share the host's address, so lock by username only
+      const key = HOSTED
+        ? username.toLowerCase()
+        : req.socket.remoteAddress + ":" + username.toLowerCase();
 
       // Is this user locked out?
       const record = attempts.get(key);
@@ -167,7 +180,7 @@ const server = http.createServer(function (req, res) {
 
       res.writeHead(200, {
         "Content-Type": "application/json",
-        "Set-Cookie": "session=" + token + "; HttpOnly; SameSite=Strict; Path=/; Max-Age=3600"
+        "Set-Cookie": "session=" + token + "; HttpOnly; SameSite=Strict; Path=/; Max-Age=3600" + (HOSTED ? "; Secure" : "")
       });
       res.end(JSON.stringify({ ok: true }));
     });
@@ -221,6 +234,8 @@ const server = http.createServer(function (req, res) {
   res.end("Not found");
 });
 
-server.listen(3000, function () {
-  console.log("Server running at http://localhost:3000");
+const PORT = process.env.PORT || 3000;
+
+server.listen(PORT, function () {
+  console.log("Server running on port " + PORT);
 });
